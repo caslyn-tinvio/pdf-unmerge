@@ -3,3 +3,4 @@ tika
 pypdf2
 pdf2image
 pytesseract
+pdfminer.six
