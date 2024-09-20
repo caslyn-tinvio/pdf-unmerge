@@ -297,16 +297,24 @@ def main():
     if uploaded_file is not None:
         if st.button("Process PDF"):
             with st.spinner("Processing..."):
-                output_files = split_invoices_by_keywords(uploaded_file, KEYWORDS_LIST, LOGIC_TYPE)
-                zip_file = create_zip_file(output_files)
+                try:
+                    output_files = split_invoices_by_keywords(uploaded_file, KEYWORDS_LIST, LOGIC_TYPE)
+                    zip_file = create_zip_file(output_files)
 
-                st.success(f"Successfully split the PDF into {len(output_files)} invoices!")
-                st.download_button(
-                    label="Download all invoices as ZIP",
-                    data=zip_file,
-                    file_name="split_invoices.zip",
-                    mime="application/zip"
-                )
+                    st.success(f"Successfully split the PDF into {len(output_files)} invoices!")
+                    st.download_button(
+                        label="Download all invoices as ZIP",
+                        data=zip_file,
+                        file_name="split_invoices.zip",
+                        mime="application/zip"
+                    )
+
+                except Exception as e:
+                    print(f"Error: {e}")
+                    # Display a generic error message to the user
+                    st.error("An error has occurred. Please try again later.")
+
+
 
 if __name__ == "__main__":
     main()
