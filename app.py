@@ -290,8 +290,9 @@ def create_zip_file(files):
 # Main Streamlit app function
 def main():
     st.title("Invoice Splitter")
+    st.markdown("Upload a singular PDF containing multiple merged invoices. Our tool will automatically split them into individual invoices for you, downloaded as a zip file!")
 
-    uploaded_file = st.file_uploader("Upload Merged Invoice PDF", type=["pdf"])
+    uploaded_file = st.file_uploader(type=["pdf"])
 
     if uploaded_file is not None:
         if st.button("Process PDF"):
