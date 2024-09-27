@@ -24,35 +24,29 @@ KEYWORDS_LIST = [
     "Order", "Order No", "Order Number", "Sales Order",
 
     # Date Indicators
-    "Invoice Date", "Date of Issue", "Issue Date", "Billing Date", "Date", "Transaction Date", "Bill Date", "Due Date"
+    "Invoice Date", "Date of Issue", "Issue Date", "Billing Date", "Transaction Date", "Bill Date"
 
     # Payment Terms and Conditions
-    "Terms", "Payment Terms", "Delivery Terms", "Payment Due", "Due Date", "Net Terms", "Terms and Conditions",
+    "Terms", "Term", "Payment Term", "Payment Terms", "Delivery Term", "Delivery Terms", "Net Terms", "Terms and Conditions",
 
     # Customer and Supplier Information
     "Bill To", "Billed To", "Invoice To", "Invoiced To", "Sold To", "Customer", "Client", "Buyer",
     "Ship To", "Shipping Address", "Delivery Address", "Deliver To", "Consignee", "Billing Address", "Bill From"
 
     # Financial and Tax Information
-    "Tax ID", "VAT Number", "GST Number", "Tax Registration Number", "Company Registration Number",
-    "Taxable Amount", "Tax Invoice",
-
-    # Amount and Payment Details
-    "Amount Due", "Total Due", "Balance Due", "Total Amount", "Grand Total", "Subtotal",
-    "Payment Instructions", "Remittance Advice", "Amount Paid",
-
-    # Itemization Headers
-    "Description", "Item", "Quantity", "Unit Price", "Price", "Amount", "Line Total", "Product Code", "SKU",
+    "Tax ID", "VAT Number", "GST Number", "Tax Registration", "Company Registration",
+    "Taxable Amount", "Tax Invoice", "GST", "GST Reg No", "UEN"
 
     # Contact and Company Information
     "Contact", "Contact Details", "Phone", "Email", "Fax", "Website", "Customer Service", "Support",
 
-    # Legal and Compliance Notices
-    "Authorized Signature", "Signature", "Terms of Service", "Privacy Policy", "Disclaimer", "Confidential",
 
     # Other Relevant Keywords
     "Account Summary", "Statement", "Billing Statement", "Reference", "Reference No", "Reference Number",
-    "Transaction ID", "Customer ID", "Client ID", "Account Number", "Payment Method"
+    "Transaction ID", "Customer ID", "Client ID", "Account Number", "Payment Method",
+
+    #Other payment related keywords
+    "Payment Voucher"
 ]
 
 LOGIC_TYPE = "OR"
@@ -60,60 +54,70 @@ LOGIC_TYPE = "OR"
 # Function to extract text using OCR for scanned PDFs
 def ocr_extract_text_from_page(reader, page_num):
     # Extract the specific page as a new single-page PDF
-    pdf_writer = PdfWriter()
-    pdf_writer.add_page(reader.pages[page_num])
+    try:
+        pdf_writer = PdfWriter()
+        pdf_writer.add_page(reader.pages[page_num])
 
-    # Create a byte stream for the single-page PDF
-    pdf_bytes_io = BytesIO()
-    pdf_writer.write(pdf_bytes_io)
-    pdf_bytes_io.seek(0)
+        # Create a byte stream for the single-page PDF
+        pdf_bytes_io = BytesIO()
+        pdf_writer.write(pdf_bytes_io)
+        pdf_bytes_io.seek(0)
 
-    # Convert the specific page (now a byte stream) to an image for OCR processing
-    image = convert_from_bytes(pdf_bytes_io.read(), first_page=1, last_page=1)[0] #convert from bytes returns list, take first element
+        # Convert the specific page (now a byte stream) to an image for OCR processing
+        image = convert_from_bytes(pdf_bytes_io.read(), first_page=1, last_page=1)[0] #convert from bytes returns list, take first element
 
-    # Convert the PDF page to an image
-    if image:
-        text = pytesseract.image_to_string(image)
-        return text.lower()  # Convert everything to lowercase for checking
-    return None
+        # Convert the PDF page to an image
+        if image:
+            text = pytesseract.image_to_string(image)
+            return text.lower()  # Convert everything to lowercase for checking
+        return None #OCRed, but nothing was read
+    except Exception as e:
+        print("OCR failed") #OCR failed, return nothing
+        return None
 
 
 # Function to check if keyword appears in the top 1/4 of the image for scanned PDFs
-def ocr_keyword_in_top_quarter(image, keywords):
+def ocr_keyword_in_top_third(image, keywords):
     ocr_data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
     image_height = image.size[1]  # Height of the image
 
-    current_line_num = None
-    line_text = ""
+    lines = {}
+    num_words = len(ocr_data["text"])
 
-    # Iterate over all detected words in the image
-    for i, word in enumerate(ocr_data["text"]):
-        if not word.strip():  # Skip empty or whitespace-only words
+    # Build a dictionary of lines with their corresponding words and positions
+    for i in range(num_words):
+        word = ocr_data["text"][i]
+        if not word.strip():
             continue
 
-        # If it's a new line, check the previous line
-        if ocr_data["line_num"][i] != current_line_num:
-            if line_text:
-                # Check the top position of the first word in the previous line
-                word_top = int(ocr_data["top"][i - 1])  # Top position of the previous line
-                if word_top < (image_height / 4):  # Check if the line is in the top 1/4
-                    for keyword in keywords:
-                        if keyword.lower() in line_text.lower():
-                            return True  # Keyword found in this line
-            # Start a new line
-            current_line_num = ocr_data["line_num"][i]
-            line_text = word  # Reset line text with the current word
-        else:
-            # Same line, so keep appending words
-            line_text += " " + word
+        line_num = ocr_data["line_num"][i]
+        word_top = int(ocr_data["top"][i])
 
-    # Check the last line after the loop finishes
-    if line_text:
-        word_top = int(ocr_data["top"][-1])  # Top position of the last word
-        if word_top < (image_height / 4):  # Check if it's in the top quarter
-            for keyword in keywords:
-                if keyword.lower() in line_text.lower():
-                    return True  # Keyword found in the last line
+        if line_num not in lines:
+            lines[line_num] = {
+                "words": [],
+                "top_positions": [],
+            }
+
+        lines[line_num]["words"].append(word)
+        lines[line_num]["top_positions"].append(word_top)
+
+    # Accumulate lines that are in the top third of the image
+    top_third_lines = []
+    for line_num, line_data in lines.items():
+        min_top = min(line_data["top_positions"])
+        if min_top < (image_height / 3):  # Check if the line is in the top 1/3
+            line_text = " ".join(line_data["words"])
+            top_third_lines.append(line_text)
+
+    # Combine all the top third lines into a single string
+    top_third_text = " ".join(top_third_lines).lower()
+    print("top_third_text:",top_third_text)
+
+    # Check for multi-line keywords
+    for keyword in keywords:
+        if keyword.lower() in top_third_text:
+            return True  # Keyword found in the top third of the image
 
     return False
 
@@ -128,8 +132,8 @@ def extract_text_from_page(reader, page_num):
         return None
 
 
-# Function to check if a keyword appears in the top 1/4 of the page for digital PDFs
-def keyword_in_top_quarter(pdf_file, page_num, keywords):
+# Function to check if a keyword appears in the top 1/3 of the page for digital PDFs
+def keyword_in_top_third(pdf_file, page_num, keywords):
     for page_layout in extract_pages(pdf_file, page_numbers=[page_num]):
         page_height = page_layout.height
 
@@ -140,7 +144,7 @@ def keyword_in_top_quarter(pdf_file, page_num, keywords):
                     if any(keyword.lower() in text.lower() for keyword in keywords):
                         # Get the vertical position of the text line
                         y = text_line.bbox[1]  # Get the y-coordinate (bottom) of the text line
-                        if y > (page_height * 3 / 4):  # Top 1/4 of the page
+                        if y > (page_height * 2 / 3):  # Top 1/3 of the page
                             return True
     return False
 
@@ -163,32 +167,34 @@ def is_continuation_page(text):
 
 # Function to split PDFs based on keywords
 def split_invoices_by_keywords(pdf_file, keywords, logic_type="OR"):
+    #initialize reader for processing PDF
     reader = PdfReader(pdf_file)
     original_pdf_name = os.path.splitext(os.path.basename(pdf_file.name))[0]
 
+    #initialize variables
     invoice_count = 0
     writer = None
     output_files = []
-    start_page = 0
+    last_transaction_page = 0 #tracks starting page of last detected transaction page, starts/sets to first page by default
 
-    for page_num in range(len(reader.pages)):
-        page_text = extract_text_from_page(reader, page_num)
+    for current_page in range(len(reader.pages)):
+        page_text = extract_text_from_page(reader, current_page)
         ocr_flag = False  # Flag to check if OCR was used
 
         # Try OCR if text extraction from digital PDF fails
         if page_text is None or page_text.strip() == "":
-            page_text = ocr_extract_text_from_page(reader, page_num)
+            page_text = ocr_extract_text_from_page(reader, current_page)
             ocr_flag = True
 
-        print(f"Processing page {page_num + 1}")
+        print(f"Processing page {current_page + 1}")
         print(f"Extracted text: {page_text if page_text else 'No text extracted'}") #get first 100 char
         print(f"OCR used: {ocr_flag}")
 
-        # If both text extraction and OCR fail, mark the page as unreadable and split
+        # If both text extraction and OCR fail, or OCR returns nothing e.g. blank page, mark the page as unreadable and split
         if page_text is None:
             print("Text extraction and OCR failed")
-            if writer is not None:
-                invoice_file = f"{original_pdf_name}_start-page-{start_page + 1}.pdf"
+            if writer is not None: #save previous file, if any
+                invoice_file = f"{original_pdf_name}_start-page-{last_transaction_page + 1}.pdf"
                 with open(invoice_file, "wb") as f:
                     writer.write(f)
                 output_files.append(invoice_file)
@@ -197,8 +203,8 @@ def split_invoices_by_keywords(pdf_file, keywords, logic_type="OR"):
 
             # Create a new writer for the unreadable page
             writer = PdfWriter()
-            writer.add_page(reader.pages[page_num])
-            invoice_file = f"{original_pdf_name}_start-page-{page_num + 1}_unreadable.pdf"
+            writer.add_page(reader.pages[current_page])
+            invoice_file = f"{original_pdf_name}_start-page-{current_page + 1}_unreadable.pdf"
             with open(invoice_file, "wb") as f:
                 writer.write(f)
             output_files.append(invoice_file)
@@ -208,16 +214,19 @@ def split_invoices_by_keywords(pdf_file, keywords, logic_type="OR"):
 
         # Detect continuation pages
         if is_continuation_page(page_text):
-            print("Continuation page detected")
-            if writer is not None:
-                writer.add_page(reader.pages[page_num])  # Add to the current writer instance
+            if writer is None:
+                writer = PdfWriter()
+                last_transaction_page = current_page
+            writer.add_page(reader.pages[current_page])  # Add to the current writer instance
             continue
+
+        keyword_found = False  # Flag to indicate if keyword was found
 
         # Check keywords for scanned PDFs (OCR-based)
         if ocr_flag and page_text:
-            # Convert the page to an image and check for keywords in the top quarter
+            # Convert the page to an image and check for keywords in the top third
             pdf_writer = PdfWriter()
-            pdf_writer.add_page(reader.pages[page_num])
+            pdf_writer.add_page(reader.pages[current_page])
 
             # Create a byte stream for the single-page PDF
             pdf_bytes_io = BytesIO()
@@ -226,50 +235,42 @@ def split_invoices_by_keywords(pdf_file, keywords, logic_type="OR"):
 
             # Convert the page to an image for OCR processing
             image = convert_from_bytes(pdf_bytes_io.read(), first_page=1, last_page=1)[0]
-            print(ocr_keyword_in_top_quarter(image, keywords))
-            if ocr_keyword_in_top_quarter(image, keywords):
-                print("Keyword found in top quarter (OCR-based PDF)")
-                if writer is not None:
-                    # Save the current invoice before starting a new one
-                    invoice_file = f"{original_pdf_name}_start-page-{start_page + 1}.pdf"
-                    with open(invoice_file, "wb") as f:
-                        writer.write(f)
-                    output_files.append(invoice_file)
-                    invoice_count += 1
-                    writer = None
-
-                # Start a new invoice
-                writer = PdfWriter()
-                start_page = page_num
-
-            writer.add_page(reader.pages[page_num])
+            if ocr_keyword_in_top_third(image, keywords):
+                keyword_found = True
 
         # Check keywords for digital PDFs
         if not ocr_flag and page_text:
-            if keyword_in_top_quarter(pdf_file, page_num, keywords):
-                print("Keyword found in top quarter (Digital PDF)")
-                if writer is not None:
-                    # Save the current invoice before starting a new one
-                    invoice_file = f"{original_pdf_name}_start-page-{start_page + 1}.pdf"
-                    with open(invoice_file, "wb") as f:
-                        writer.write(f)
-                    output_files.append(invoice_file)
-                    invoice_count += 1
-                    writer = None
+            if keyword_in_top_third(pdf_file, current_page, keywords):
+                keyword_found = True
 
-                # Start a new invoice
-                writer = PdfWriter()
-                start_page = page_num
+        if keyword_found:
+            print("Keyword found in top third")
+            if writer is not None: #there is a current running invoice
+                # Save the current invoice before starting a new one
+                invoice_file = f"{original_pdf_name}_start-page-{last_transaction_page + 1}.pdf"
+                with open(invoice_file, "wb") as f:
+                    writer.write(f)
+                output_files.append(invoice_file)
+                invoice_count += 1
+                writer = None #clean up writer step
 
-            writer.add_page(reader.pages[page_num])
+            # Start a new invoice
+            writer = PdfWriter()
+            last_transaction_page = current_page
+            writer.add_page(reader.pages[current_page])  # Add current page to new writer
+            continue
 
-    #if no keyword found, if there is previous invoice detected, group and save. Else, split and save at this point?
-
+        # If no keyword found, add page to current invoice
+        if writer is None:
+            writer = PdfWriter()
+            last_transaction_page = current_page
+        print("No keyword found, grouping page with last detected invoice")
+        writer.add_page(reader.pages[current_page])
 
 
     # Save the last invoice
-    if writer is not None:
-        invoice_file = f"{original_pdf_name}_start-page-{start_page + 1}.pdf"
+    if writer is not None and len(writer.pages) > 0:
+        invoice_file = f"{original_pdf_name}_start-page-{last_transaction_page + 1}.pdf"
         with open(invoice_file, "wb") as f:
             writer.write(f)
         output_files.append(invoice_file)
@@ -298,8 +299,11 @@ def main():
         if st.button("Process PDF"):
             with st.spinner("Processing..."):
                 try:
+                    print("Processing new merged pdf")
                     output_files = split_invoices_by_keywords(uploaded_file, KEYWORDS_LIST, LOGIC_TYPE)
                     zip_file = create_zip_file(output_files)
+                    with open("local_vers.zip", "wb") as f:
+                        f.write(zip_file.read())
 
                     st.success(f"Successfully split the PDF into {len(output_files)} invoices!")
                     st.download_button(
